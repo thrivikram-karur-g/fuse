@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -54,7 +55,9 @@ func Mount(
 	}
 
 	// Begin the mounting process, which will continue in the background.
-	if config.DebugLogger != nil {
+	if config.StructuredLogger != nil {
+		config.StructuredLogger.Debug("Beginning the mounting kickoff process")
+	} else if config.DebugLogger != nil {
 		config.DebugLogger.Println("Beginning the mounting kickoff process")
 	}
 	ready := make(chan error, 1)
@@ -62,7 +65,9 @@ func Mount(
 	if err != nil {
 		return nil, fmt.Errorf("mount: %v", err)
 	}
-	if config.DebugLogger != nil {
+	if config.StructuredLogger != nil {
+		config.StructuredLogger.Debug("Completed the mounting kickoff process")
+	} else if config.DebugLogger != nil {
 		config.DebugLogger.Println("Completed the mounting kickoff process")
 	}
 
@@ -72,7 +77,9 @@ func Mount(
 		cfgCopy.OpContext = context.Background()
 	}
 
-	if config.DebugLogger != nil {
+	if config.StructuredLogger != nil {
+		config.StructuredLogger.Debug("Creating a connection object")
+	} else if config.DebugLogger != nil {
 		config.DebugLogger.Println("Creating a connection object")
 	}
 	// Create a Connection object wrapping the device.
@@ -80,12 +87,15 @@ func Mount(
 		cfgCopy,
 		config.DebugLogger,
 		config.ErrorLogger,
+		config.StructuredLogger,
 		config.WireLogger,
 		dev)
 	if err != nil {
 		return nil, fmt.Errorf("newConnection: %v", err)
 	}
-	if config.DebugLogger != nil {
+	if config.StructuredLogger != nil {
+		config.StructuredLogger.Debug("Successfully created the connection")
+	} else if config.DebugLogger != nil {
 		config.DebugLogger.Println("Successfully created the connection")
 	}
 
@@ -96,7 +106,9 @@ func Mount(
 		close(mfs.joinStatusAvailable)
 	}()
 
-	if config.DebugLogger != nil {
+	if config.StructuredLogger != nil {
+		config.StructuredLogger.Debug("Waiting for mounting process to complete")
+	} else if config.DebugLogger != nil {
 		config.DebugLogger.Println("Waiting for mounting process to complete")
 	}
 
@@ -128,8 +140,10 @@ func checkMountPoint(dir string) error {
 	return nil
 }
 
-func fusermount(binary string, argv []string, additionalEnv []string, wait bool, debugLogger *log.Logger) (*os.File, error) {
-	if debugLogger != nil {
+func fusermount(binary string, argv []string, additionalEnv []string, wait bool, debugLogger *log.Logger, structuredLogger *slog.Logger) (*os.File, error) {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Creating a socket pair")
+	} else if debugLogger != nil {
 		debugLogger.Println("Creating a socket pair")
 	}
 	// Create a socket pair.
@@ -138,7 +152,9 @@ func fusermount(binary string, argv []string, additionalEnv []string, wait bool,
 		return nil, fmt.Errorf("Socketpair: %v", err)
 	}
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Creating files to wrap the sockets")
+	} else if debugLogger != nil {
 		debugLogger.Println("Creating files to wrap the sockets")
 	}
 	// Wrap the sockets into os.File objects that we will pass off to fusermount.
@@ -148,7 +164,9 @@ func fusermount(binary string, argv []string, additionalEnv []string, wait bool,
 	readFile := os.NewFile(uintptr(fds[1]), "fusermount-parent-reads")
 	defer readFile.Close()
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Starting fusermount/os mount")
+	} else if debugLogger != nil {
 		debugLogger.Println("Starting fusermount/os mount")
 	}
 	// Start fusermount/mount_macfuse/mount_osxfuse.
@@ -168,7 +186,9 @@ func fusermount(binary string, argv []string, additionalEnv []string, wait bool,
 		return nil, fmt.Errorf("running %v: %v", binary, err)
 	}
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Wrapping socket pair in a connection")
+	} else if debugLogger != nil {
 		debugLogger.Println("Wrapping socket pair in a connection")
 	}
 	// Wrap the socket file in a connection.
@@ -178,7 +198,9 @@ func fusermount(binary string, argv []string, additionalEnv []string, wait bool,
 	}
 	defer c.Close()
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Checking that we have a unix domain socket")
+	} else if debugLogger != nil {
 		debugLogger.Println("Checking that we have a unix domain socket")
 	}
 	// We expect to have a Unix domain socket.
@@ -187,7 +209,9 @@ func fusermount(binary string, argv []string, additionalEnv []string, wait bool,
 		return nil, fmt.Errorf("Expected UnixConn, got %T", c)
 	}
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Read a message from socket")
+	} else if debugLogger != nil {
 		debugLogger.Println("Read a message from socket")
 	}
 	// Read a message.
@@ -211,7 +235,9 @@ func fusermount(binary string, argv []string, additionalEnv []string, wait bool,
 
 	scm := scms[0]
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Successfully read the socket message.")
+	} else if debugLogger != nil {
 		debugLogger.Println("Successfully read the socket message.")
 	}
 
@@ -225,7 +251,9 @@ func fusermount(binary string, argv []string, additionalEnv []string, wait bool,
 		return nil, fmt.Errorf("wanted 1 fd; got %#v", gotFds)
 	}
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Converting FD into os.File")
+	} else if debugLogger != nil {
 		debugLogger.Println("Converting FD into os.File")
 	}
 	// Turn the FD into an os.File.

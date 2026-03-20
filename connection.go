@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"path"
 	"runtime"
@@ -59,10 +60,11 @@ const maxReadahead = 1 << 20
 // Connection represents a connection to the fuse kernel process. It is used to
 // receive and reply to requests from the kernel.
 type Connection struct {
-	cfg         MountConfig
-	debugLogger *log.Logger
-	errorLogger *log.Logger
-	wireLogger  io.Writer
+	cfg              MountConfig
+	debugLogger      *log.Logger
+	errorLogger      *log.Logger
+	structuredLogger *slog.Logger
+	wireLogger       io.Writer
 
 	// The device through which we're talking to the kernel, and the protocol
 	// version that we're using to talk to it.
@@ -110,15 +112,17 @@ func newConnection(
 	cfg MountConfig,
 	debugLogger *log.Logger,
 	errorLogger *log.Logger,
+	structuredLogger *slog.Logger,
 	wireLogger io.Writer,
 	dev *os.File) (*Connection, error) {
 	c := &Connection{
-		cfg:         cfg,
-		debugLogger: debugLogger,
-		errorLogger: errorLogger,
-		wireLogger:  wireLogger,
-		dev:         dev,
-		cancelFuncs: make(map[uint64]func()),
+		cfg:              cfg,
+		debugLogger:      debugLogger,
+		errorLogger:      errorLogger,
+		structuredLogger: structuredLogger,
+		wireLogger:       wireLogger,
+		dev:              dev,
+		cancelFuncs:      make(map[uint64]func()),
 	}
 
 	// Initialize.
@@ -245,7 +249,7 @@ func (c *Connection) debugLog(
 	calldepth int,
 	format string,
 	v ...interface{}) {
-	if c.debugLogger == nil {
+	if c.structuredLogger == nil && c.debugLogger == nil {
 		return
 	}
 
@@ -261,12 +265,19 @@ func (c *Connection) debugLog(
 
 	fileLine := fmt.Sprintf("%v:%v", path.Base(file), line)
 
+	formattedMsg := fmt.Sprintf(format, v...)
+
+	if c.structuredLogger != nil {
+		c.structuredLogger.Debug(formattedMsg, "fuseID", fuseID, "caller", fileLine)
+		return
+	}
+
 	// Format the actual message to be printed.
 	msg := fmt.Sprintf(
 		"Op 0x%08x %24s] %v",
 		fuseID,
 		fileLine,
-		fmt.Sprintf(format, v...))
+		formattedMsg)
 
 	// Print it.
 	c.debugLogger.Println(msg)
@@ -503,7 +514,7 @@ func (c *Connection) shouldLogError(
 	}
 
 	// We can't log if there's nothing to log to.
-	if c.errorLogger == nil {
+	if c.errorLogger == nil && c.structuredLogger == nil {
 		return false
 	}
 
@@ -568,19 +579,31 @@ func (c *Connection) Reply(ctx context.Context, opErr error) error {
 	logError := c.shouldLogError(op, opErr)
 
 	// Debug logging
-	if c.debugLogger != nil {
+	if c.structuredLogger != nil {
 		if opErr == nil {
-			c.debugLog(fuseID, 1, "-> %s", describeResponse(op))
+			c.structuredLogger.Debug("-> "+describeResponse(op), "fuseID", fuseID, "op", fmt.Sprintf("%T", op))
 		} else {
 			if !logError {
-				c.debugLog(fuseID, 1, "-> Error: %q", opErr.Error())
+				c.structuredLogger.Debug("-> Error: "+opErr.Error(), "fuseID", fuseID, "op", fmt.Sprintf("%T", op))
+			} else {
+				c.structuredLogger.Error("-> Error: "+opErr.Error(), "fuseID", fuseID, "op", fmt.Sprintf("%T", op), "error", opErr)
 			}
 		}
-	}
+	} else {
+		if c.debugLogger != nil {
+			if opErr == nil {
+				c.debugLog(fuseID, 1, "-> %s", describeResponse(op))
+			} else {
+				if !logError {
+					c.debugLog(fuseID, 1, "-> Error: %q", opErr.Error())
+				}
+			}
+		}
 
-	// Error logging
-	if logError {
-		c.errorLogger.Printf("Op 0x%08x %T] -> Error: %q", fuseID, op, opErr)
+		// Error logging
+		if logError && c.errorLogger != nil {
+			c.errorLogger.Printf("Op 0x%08x %T] -> Error: %q", fuseID, op, opErr)
+		}
 	}
 
 	// Send the reply to the kernel, if one is required.
@@ -590,7 +613,9 @@ func (c *Connection) Reply(ctx context.Context, opErr error) error {
 		err := c.writeOutMessage(outMsg)
 		if err != nil {
 			writeErrMsg := fmt.Sprintf("writeMessage: %v %v", err, outMsg.OutHeaderBytes())
-			if c.errorLogger != nil {
+			if c.structuredLogger != nil {
+				c.structuredLogger.Error(writeErrMsg)
+			} else if c.errorLogger != nil {
 				c.errorLogger.Print(writeErrMsg)
 			}
 			return fmt.Errorf(writeErrMsg)
