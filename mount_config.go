@@ -19,9 +19,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"runtime"
 	"strings"
 )
+
+// LevelTrace is a custom log level for trace logs (-8).
+const LevelTrace = slog.Level(-8)
 
 // Optional configuration accepted by Mount.
 type MountConfig struct {
@@ -47,6 +51,10 @@ type MountConfig struct {
 	// A logger to use for logging debug information. If nil, no debug logging is
 	// performed.
 	DebugLogger *log.Logger
+
+	// A structured logger to use for logging debug information. If nil, it falls back
+	// to DebugLogger or ErrorLogger.
+	StructuredLogger *slog.Logger
 
 	// A logger to use for logging fuse wire requests. If nil, no wire logging is
 	// performed.

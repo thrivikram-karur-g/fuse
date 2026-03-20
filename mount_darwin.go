@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -209,7 +210,7 @@ func callMountCommFD(
 	env = append(env, "_FUSE_COMMVERS=2")
 	argv = append(argv, dir)
 
-	return fusermount(bin, argv, env, false, cfg.DebugLogger)
+	return fusermount(bin, argv, env, false, cfg.DebugLogger, cfg.StructuredLogger)
 }
 
 // Begin the process of mounting at the given directory, returning a connection
@@ -298,8 +299,11 @@ func startFuseTServer(binary string, argv []string,
 	additionalEnv []string,
 	wait bool,
 	debugLogger *log.Logger,
+	structuredLogger *slog.Logger,
 	ready chan<- error) (*os.File, error) {
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Creating a socket pair")
+	} else if debugLogger != nil {
 		debugLogger.Println("Creating a socket pair")
 	}
 
@@ -319,11 +323,15 @@ func startFuseTServer(binary string, argv []string,
 	syscall.CloseOnExec(int(local.Fd()))
 	syscall.CloseOnExec(int(local_mon.Fd()))
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Creating files to wrap the sockets")
+	} else if debugLogger != nil {
 		debugLogger.Println("Creating files to wrap the sockets")
 	}
 
-	if debugLogger != nil {
+	if structuredLogger != nil {
+		structuredLogger.Debug("Starting fuset mount")
+	} else if debugLogger != nil {
 		debugLogger.Println("Starting fusermount/os mount")
 	}
 	// Start fusermount/mount_macfuse/mount_osxfuse.
@@ -406,7 +414,7 @@ func mountFuset(
 	env = append(env, "_FUSE_COMMVERS=2")
 	argv = append(argv, dir)
 
-	return startFuseTServer(fuseTBin, argv, env, false, cfg.DebugLogger, ready)
+	return startFuseTServer(fuseTBin, argv, env, false, cfg.DebugLogger, cfg.StructuredLogger, ready)
 }
 
 func mount(
